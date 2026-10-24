@@ -1,0 +1,13 @@
+{
+  "status": "passed",
+  "input_path": "/mnt/data_x1/huchuyu/llm_dataset/pretrain/owt_train.txt",
+  "input_bytes": 11920511059,
+  "parts_read": 2399398,
+  "body_characters": 11784806012,
+  "max_part_characters": 100000,
+  "chunk_size": 1048576,
+  "address_space_limit_gib": 100,
+  "elapsed_seconds": 47.7,
+  "peak_process_rss_bytes": 533573632,
+  "scope": "full corpus read and document splitting; no pretoken counts or merge training"
+}

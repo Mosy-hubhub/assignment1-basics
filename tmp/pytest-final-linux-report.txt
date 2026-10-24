@@ -1,0 +1,139 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.15, pytest-9.1.1, pluggy-1.7.0
+rootdir: /mnt/data_x1/huchuyu/CS336/assignment1-basics
+configfile: pyproject.toml
+plugins: platformdirs-4.13.5, jaxtyping-0.3.11, timeout-2.4.0, anyio-4.15.1
+timeout: 120.0s
+timeout method: signal
+timeout func_only: False
+collected 48 items
+
+tests/test_data.py::test_get_batch PASSED
+tests/test_model.py::test_linear PASSED
+tests/test_model.py::test_embedding PASSED
+tests/test_model.py::test_swiglu PASSED
+tests/test_model.py::test_scaled_dot_product_attention PASSED
+tests/test_model.py::test_4d_scaled_dot_product_attention PASSED
+tests/test_model.py::test_multihead_self_attention PASSED
+tests/test_model.py::test_multihead_self_attention_with_rope PASSED
+tests/test_model.py::test_transformer_lm PASSED
+tests/test_model.py::test_transformer_lm_truncated_input PASSED
+tests/test_model.py::test_transformer_block PASSED
+tests/test_model.py::test_rmsnorm PASSED
+tests/test_model.py::test_rope PASSED
+tests/test_model.py::test_silu_matches_pytorch PASSED
+tests/test_nn_utils.py::test_softmax_matches_pytorch PASSED
+tests/test_nn_utils.py::test_cross_entropy PASSED
+tests/test_nn_utils.py::test_gradient_clipping PASSED
+tests/test_optimizer.py::test_adamw PASSED
+tests/test_optimizer.py::test_get_lr_cosine_schedule PASSED
+tests/test_serialization.py::test_checkpointing PASSED
+tests/test_tokenizer.py::test_roundtrip_empty PASSED
+tests/test_tokenizer.py::test_empty_matches_tiktoken PASSED
+tests/test_tokenizer.py::test_roundtrip_single_character PASSED
+tests/test_tokenizer.py::test_single_character_matches_tiktoken PASSED
+tests/test_tokenizer.py::test_roundtrip_single_unicode_character PASSED
+tests/test_tokenizer.py::test_single_unicode_character_matches_tiktoken PASSED
+tests/test_tokenizer.py::test_roundtrip_ascii_string PASSED
+tests/test_tokenizer.py::test_ascii_string_matches_tiktoken PASSED
+tests/test_tokenizer.py::test_roundtrip_unicode_string PASSED
+tests/test_tokenizer.py::test_unicode_string_matches_tiktoken PASSED
+tests/test_tokenizer.py::test_roundtrip_unicode_string_with_special_tokens PASSED
+tests/test_tokenizer.py::test_unicode_string_with_special_tokens_matches_tiktoken PASSED
+tests/test_tokenizer.py::test_overlapping_special_tokens PASSED
+tests/test_tokenizer.py::test_address_roundtrip PASSED
+tests/test_tokenizer.py::test_address_matches_tiktoken PASSED
+tests/test_tokenizer.py::test_german_roundtrip PASSED
+tests/test_tokenizer.py::test_german_matches_tiktoken PASSED
+tests/test_tokenizer.py::test_tinystories_sample_roundtrip PASSED
+tests/test_tokenizer.py::test_tinystories_matches_tiktoken PASSED
+tests/test_tokenizer.py::test_encode_special_token_trailing_newlines PASSED
+tests/test_tokenizer.py::test_encode_special_token_double_newline_non_whitespace PASSED
+tests/test_tokenizer.py::test_encode_iterable_tinystories_sample_roundtrip PASSED
+tests/test_tokenizer.py::test_encode_iterable_tinystories_matches_tiktoken PASSED
+tests/test_tokenizer.py::test_encode_iterable_memory_usage FAILED
+tests/test_tokenizer.py::test_encode_memory_usage XFAIL (Tokenizer.e...)
+tests/test_train_bpe.py::test_train_bpe_speed FAILED
+tests/test_train_bpe.py::test_train_bpe PASSED
+tests/test_train_bpe.py::test_train_bpe_special_tokens PASSED
+
+=================================== FAILURES ===================================
+______________________ test_encode_iterable_memory_usage _______________________
+
+    @pytest.mark.skipif(
+        not sys.platform.startswith("linux"),
+        reason="rlimit support for non-linux systems is spotty.",
+    )
+    def test_encode_iterable_memory_usage():
+        tokenizer = get_tokenizer_from_vocab_merges_path(
+            vocab_path=VOCAB_PATH,
+            merges_path=MERGES_PATH,
+        )
+        with open(FIXTURES_PATH / "tinystories_sample_5M.txt") as f:
+            ids = []
+>           for _id in _encode_iterable(tokenizer, f):
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_tokenizer.py:427: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_tokenizer.py:455: in _encode_iterable
+    yield from tokenizer.encode_iterable(iterable)
+cs336_basics/tokenizer.py:133: in encode_iterable
+    yield from self.encode(text)
+               ^^^^^^^^^^^^^^^^^
+cs336_basics/tokenizer.py:126: in encode
+    part_token_ID = self._merged(pre_token_bytes)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <cs336_basics.tokenizer.BPE object at 0x7fd34fc36a20>, tokens = [b'.']
+
+    def _merged(self, tokens: list[bytes]) -> list[int]:
+        for pair in self.merges:
+            new_tokens = []
+            i = 0
+    
+            while i < len(tokens):
+                if (
+                    i + 1 < len(tokens)
+                    and (tokens[i], tokens[i + 1]) == pair
+                ):
+                    new_tokens.append(tokens[i] + tokens[i + 1])
+                    i += 2
+                else:
+                    new_tokens.append(tokens[i])
+                    i += 1
+    
+            # 下一条规则作用在本轮合并后的结果上
+>           tokens = new_tokens
+            ^^^^^^
+E           Failed: Timeout (>120.0s) from pytest-timeout.
+
+cs336_basics/tokenizer.py:67: Failed
+_____________________________ test_train_bpe_speed _____________________________
+
+    def test_train_bpe_speed():
+        """
+        Ensure that BPE training is relatively efficient by measuring training
+        time on this small dataset and throwing an error if it takes more than 1.5 seconds.
+        This is a pretty generous upper-bound, it takes 0.38 seconds with the
+        reference implementation on my laptop. In contrast, the toy implementation
+        takes around 3 seconds.
+        """
+        input_path = FIXTURES_PATH / "corpus.en"
+        start_time = time.time()
+        _, _ = run_train_bpe(
+            input_path=input_path,
+            vocab_size=500,
+            special_tokens=["<|endoftext|>"],
+        )
+        end_time = time.time()
+>       assert end_time - start_time < 1.5
+E       assert (1792669067.5238554 - 1792669064.5159569) < 1.5
+
+tests/test_train_bpe.py:24: AssertionError
+- generated xml file: /mnt/data_x1/huchuyu/CS336/assignment1-basics/tmp/pytest-final-linux.xml -
+=========================== short test summary info ============================
+FAILED tests/test_tokenizer.py::test_encode_iterable_memory_usage - Failed: T...
+FAILED tests/test_train_bpe.py::test_train_bpe_speed - assert (1792669067.523...
+============= 2 failed, 45 passed, 1 xfailed in 178.55s (0:02:58) ==============
