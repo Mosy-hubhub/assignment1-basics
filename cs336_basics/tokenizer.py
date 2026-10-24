@@ -3,8 +3,9 @@ from torch import Tensor
 from jaxtyping import Bool, Float, Int
 import regex as re
 import os
-from collections import Counter
+from collections import Counter, defaultdict
 from collections.abc import Iterable, Iterator
+from tqdm import tqdm
 
 
 PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
@@ -224,7 +225,18 @@ def train_bpe(
 
     ### step5: 反复统计和合并
 
-    for _ in range(vocab_size - len(vocab)):
+    # pair -> 包含它的词；同一个词中出现多次，也只记录一次。
+    # 此索引只用于缩小应用合并的范围，pair 频率仍在每轮全量重算。
+    pair_words = defaultdict(set)
+    for word in word_counts:
+        for pair in zip(word, word[1:]):
+            pair_words[pair].add(word)
+
+    for _ in tqdm(
+        range(max(0, vocab_size - len(vocab))),
+        desc="BPE merges", unit="merge", dynamic_ncols=True, mininterval=1.0,
+        disable=not kwargs.get("show_progress", True),
+    ):
         # 每轮都重新统计，因为上一轮合并改变了相邻关系
         pair_counts = Counter()
 
@@ -247,10 +259,25 @@ def train_bpe(
         merged_token = best_pair[0] + best_pair[1]
         vocab[len(vocab)] = merged_token
 
-        # 在所有 pre-token 中应用这条合并规则
-        new_word_counts = Counter()
-
-        for word, count in word_counts.items():
+        # 原来这里遍历 word_counts.items()，重建全部 new_word_counts。
+        # 此时 pair_words 中已经没有 best_pair 这个 key，但其他 pair 的集合里仍可能包含当前旧词。
+        affected_words = pair_words.pop(best_pair)
+        for word in affected_words:
+            # count: word(由bytes组成) 在原本语料中的出现次数,这里只处理包含bestpair的word
+            # 这里先把含有best pair的词从 word-count 表中移除
+            count = word_counts.pop(word)
+            
+            # 移除旧词的索引
+            for pair in set(zip(word, word[1:])):
+                # 此时pair_words 里面已经没有含有best pair的词了
+                # 所以indexed_words里面就是pair对应的word里面没有包含best pair的
+                indexed_words = pair_words.get(pair)
+                if indexed_words is not None:
+                    # 从某个 pair 的集合中移除当前旧词
+                    indexed_words.discard(word)
+                    if not indexed_words:
+                        del pair_words[pair]
+                        
             new_word = []
             i = 0
 
@@ -265,8 +292,10 @@ def train_bpe(
                     new_word.append(word[i])
                     i += 1
 
-            new_word_counts[tuple(new_word)] += count
-
-        word_counts = new_word_counts
+            new_word = tuple(new_word)
+            word_counts[new_word] = count
+            # 更新对应的pair_words记录，因为换表示了
+            for pair in zip(new_word, new_word[1:]):
+                pair_words[pair].add(new_word)
 
     return vocab, merges
