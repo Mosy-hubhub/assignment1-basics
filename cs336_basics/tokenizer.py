@@ -5,6 +5,7 @@ import regex as re
 import os
 from collections import Counter, defaultdict
 from collections.abc import Iterable, Iterator
+from functools import lru_cache
 from tqdm import tqdm
 
 
@@ -46,9 +47,17 @@ class BPE():
                 self.vocab[next_id] = token_bytes
                 self.reverse_vocab[token_bytes] = next_id
                 next_id += 1   
+
+        # 每个 tokenizer 独立缓存最近使用的 10 万种 pre-token，避免重复合并。
+        # key 和结果都使用不可变 tuple，防止调用方修改缓存中的结果。
+        self._merge_cache = lru_cache(maxsize=100_000)(self._merge_uncached)
     
     
     def _merged(self, tokens: list[bytes]) -> list[int]:
+        return list(self._merge_cache(tuple(tokens)))
+
+    def _merge_uncached(self, token_key: tuple[bytes, ...]) -> tuple[int, ...]:
+        tokens = list(token_key)
         for pair in self.merges:
             new_tokens = []
             i = 0
@@ -67,7 +76,7 @@ class BPE():
             # 下一条规则作用在本轮合并后的结果上
             tokens = new_tokens
 
-        return [self.reverse_vocab[token] for token in tokens]
+        return tuple(self.reverse_vocab[token] for token in tokens)
 
 
     def decode(self, token_ID):
@@ -226,25 +235,19 @@ def train_bpe(
     ### step5: 反复统计和合并
 
     # pair -> 包含它的词；同一个词中出现多次，也只记录一次。
-    # 此索引只用于缩小应用合并的范围，pair 频率仍在每轮全量重算。
+    # 初始化时全量统计一次频率，之后只更新受影响词的贡献。
     pair_words = defaultdict(set)
-    for word in word_counts:
+    pair_counts = Counter()
+    for word, count in word_counts.items():
         for pair in zip(word, word[1:]):
             pair_words[pair].add(word)
+            pair_counts[pair] += count
 
     for _ in tqdm(
         range(max(0, vocab_size - len(vocab))),
         desc="BPE merges", unit="merge", dynamic_ncols=True, mininterval=1.0,
         disable=not kwargs.get("show_progress", True),
     ):
-        # 每轮都重新统计，因为上一轮合并改变了相邻关系
-        pair_counts = Counter()
-
-        for word, count in word_counts.items():
-            for i in range(len(word) - 1):
-                pair = (word[i], word[i + 1])
-                pair_counts[pair] += count
-
         if not pair_counts:
             break
 
@@ -267,10 +270,14 @@ def train_bpe(
             # 这里先把含有best pair的词从 word-count 表中移除
             count = word_counts.pop(word)
             
-            # 移除旧词的索引
-            for pair in set(zip(word, word[1:])):
-                # 此时pair_words 里面已经没有含有best pair的词了
-                # 所以indexed_words里面就是pair对应的word里面没有包含best pair的
+            # 扣除旧词的频率贡献，并移除旧词的索引。
+            # 同一个 pair 在词中可能出现多次，必须乘上出现次数和词频。
+            old_pairs = Counter(zip(word, word[1:]))
+            for pair, occurrences in old_pairs.items():
+                pair_counts[pair] -= occurrences * count
+                if pair_counts[pair] == 0:
+                    del pair_counts[pair]
+                # best_pair 的索引项已被 pop；其他 pair 仍需清理旧词。
                 indexed_words = pair_words.get(pair)
                 if indexed_words is not None:
                     # 从某个 pair 的集合中移除当前旧词
@@ -294,8 +301,10 @@ def train_bpe(
 
             new_word = tuple(new_word)
             word_counts[new_word] = count
-            # 更新对应的pair_words记录，因为换表示了
-            for pair in zip(new_word, new_word[1:]):
+            # 加入新词的频率贡献，并登记新的索引。
+            new_pairs = Counter(zip(new_word, new_word[1:]))
+            for pair, occurrences in new_pairs.items():
+                pair_counts[pair] += occurrences * count
                 pair_words[pair].add(new_word)
 
     return vocab, merges
